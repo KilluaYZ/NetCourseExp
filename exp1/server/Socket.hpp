@@ -197,8 +197,12 @@ namespace Socket
         int _ext_size;
         int _byte_size;
         int _cur;
-        virtual Data first() = 0;
-        virtual Data end() = 0;
+        virtual Data first();
+        virtual Data end();
+        virtual Data mid();
+        virtual void first(Data data);
+        virtual void end(Data data);
+        virtual void mid(Data data);
     public:
         BinaryStream(std::string file_path){
             this->file_path = file_path;
@@ -207,8 +211,13 @@ namespace Socket
             this->_ext_size = 0;
             this->_byte_size = 0;
         };
-        virtual Data next() = 0; 
-        virtual bool has_next() = 0;
+        virtual Data next(); 
+        virtual void next(Data data);
+        virtual bool has_next(){
+            if(this->_ext_size == 0) return true; 
+            if(this->_cur < this->_ext_size) return true;
+            return false;
+        }
         virtual int size(){
             return this->_size;
         } 
@@ -243,6 +252,20 @@ namespace Socket
             return ret;
         }
 
+        Data mid() override{
+            _frame mid_frame;
+            mid_frame._id = _cur;
+            mid_frame._type = FRAME_TYPE_DATA;
+            //读入数据
+            infile.read(mid_frame.buf, FRAME_BUF_SIZE);
+            //确定读入的长度
+            mid_frame._length = infile.gcount();
+            Data ret;
+            ret.size = FRAME_HEAD_SIZE + mid_frame._length;
+            memcpy(ret.buf, (void*)&mid_frame, ret.size); 
+            return ret;
+        }
+
     public:
         iBinaryStream(std::string file_path):BinaryStream(file_path){
             infile = std::ifstream(file_path, ios::binary);
@@ -258,6 +281,73 @@ namespace Socket
             this->_ext_size = this->_size + 2;
         }
 
+        ~iBinaryStream(){
+            if(infile.is_open()) infile.close();
+        }
+
+        Data next() override {
+            Data ret;
+            if(_cur == 0){
+                //第一个帧
+                ret = first();
+            }else if(_cur == _ext_size - 1){
+                //最后一个帧
+                ret = end();
+            }else{
+                //中间的数据帧
+                ret = mid();
+            }
+            _cur++;
+            return ret;
+        }
+    };
+
+    class oBinaryStream : public BinaryStream{
+    protected:
+        std::ofstream outfile;
+        void first(Data data) override{
+            _frame* _fp = (_frame*)data.buf;
+            if(_fp->_type != FRAME_TYPE_START) throw Exception("oBinaryStream::first frame type error");
+            if(_fp->_id != 0) throw Exception("oBinaryStream::first frame id error");
+            this->_size = _fp->_length;
+            this->_ext_size = this->_size + 2; 
+        }
+         
+        void end(Data data) override{
+            _frame* _fp = (_frame*)data.buf;
+            if(_fp->_type != FRAME_TYPE_END) throw Exception("oBinaryStream::end frame type error");
+            if(_fp->_id != this->ext_size() - 1) throw Exception("oBinaryStream::end frame id error");
+        }
+
+        void mid(Data data) override{
+            _frame* _fp = (_frame*)data.buf;
+            if(_fp->_type != FRAME_TYPE_DATA) throw Exception("oBinaryStream::mid frame type error");
+            outfile.write(_fp->buf, _fp->_length);
+        }
+
+    public:
+        oBinaryStream(std::string file_path) : BinaryStream(file_path) {
+            outfile = std::ofstream(file_path, ios::out | ios::binary);  
+            if(!outfile) throw Exception("oBinaryStream::oBinaryStream failed to open file"); 
+        }
+
+        ~oBinaryStream(){
+            if(outfile.is_open()) outfile.close();
+        }
+
+        void next(Data data) override{
+            if(_cur == 0){
+                //第一个帧
+                first(data);
+            }else if(_cur == _ext_size - 1){
+                //最后一个帧
+                end(data);
+            }else{
+                //中间的数据帧
+                mid(data);
+            }
+            _cur++;
+        }
     };
 
     class FileSocket{
@@ -270,10 +360,20 @@ namespace Socket
             socket.bind(port);
         }
 
-        void send(std::string file_path){
-            
+        void send(Ip ip, Port port, std::string file_path){
+            iBinaryStream ibs(file_path);
+            while(ibs.has_next()){
+                socket.send(ip, port, ibs.next());
+            }    
         }
 
+        void recv(std::string file_path){
+            oBinaryStream obs(file_path);
+            while(obs.has_next()){
+                Datagram dg = socket.receive();
+                obs.next(dg.data);
+            }
+        }
     };
 }
 
