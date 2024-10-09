@@ -36,21 +36,38 @@ using namespace std;
 namespace Socket
 {
 
-    const int FRAME_BUF_SIZE = 1018; 
-    const int FRAME_HEAD_SIZE = 6;
+    const int FRAME_BUF_SIZE = 1016; 
+    const int FRAME_HEAD_SIZE = 8;
     const int FRAME_SIZE = 1024;
     const int FRAME_TYPE_START = 1;
     const int FRAME_TYPE_END = 2;
     const int FRAME_TYPE_DATA = 3;
+    const int FRAME_TYPE_ACK = 4;
 
     typedef int Socket;
     typedef string Ip;
     typedef unsigned int Port;
 
-    typedef struct{
-        int size;
+    struct _frame{
+        uint32_t _id;
+        uint16_t _type;
+        uint16_t _length;
         char buf[FRAME_BUF_SIZE];
-    } Data;
+    };
+
+    class Data{
+    public:
+        int size;
+        char *buf;
+        Data() {
+            this->size = 0;
+            this->buf = (char*)malloc(sizeof(char) * FRAME_SIZE);
+        }
+
+        ~Data() {
+            free(this->buf);
+        }
+    };
     
     typedef struct
     {
@@ -105,7 +122,7 @@ namespace Socket
         ~UDP(void);
         void close(void);
         void bind(Port port);
-        void send(Ip ip, Port port, Data data);
+        void send(Ip ip, Port port, Data* data);
         Datagram receive();
     };
 
@@ -148,14 +165,14 @@ namespace Socket
             this->_binded = true;
         }
         
-    void UDP::send(Ip ip, Port port, Data data)
+    void UDP::send(Ip ip, Port port, Data* data)
         {
             struct sockaddr_in address;
             address.sin_family = AF_INET;
             address.sin_port = htons(port);
             inet_aton(ip.c_str(), &address.sin_addr);
-            
-            if (sendto(this->_socket_id, (void*)data.buf, data.size + 1, 0, (struct sockaddr*)&address, sizeof(struct sockaddr_in)) == -1)
+            cout<<"[Send] id: "<<((_frame*)data->buf)->_id<<" type: "<<((_frame*)data->buf)->_type << " length: "<<((_frame*)data->buf)->_length<<endl;
+            if (sendto(this->_socket_id, (void*)data->buf, data->size, 0, (struct sockaddr*)&address, sizeof(struct sockaddr_in)) == -1)
             {
                 stringstream error;
                 error << "[send] with [ip=" << ip << "] [port=" << port << "] Cannot send";
@@ -166,43 +183,38 @@ namespace Socket
     Datagram UDP::receive()
         {
             int size = sizeof(struct sockaddr_in);
-            char *buffer = (char*)malloc(sizeof(char) * FRAME_BUF_SIZE);
+            char *buffer = (char*)malloc(sizeof(char) * FRAME_SIZE);
             struct sockaddr_in address;
             Datagram ret;
-            int recv_size = recvfrom(this->_socket_id, (void*)buffer, FRAME_BUF_SIZE, 0, (struct sockaddr*)&address, (socklen_t*)&size); 
+            int recv_size = recvfrom(this->_socket_id, (void*)buffer, FRAME_SIZE, 0, (struct sockaddr*)&address, (socklen_t*)&size); 
             if (recv_size == -1) throw Exception("[receive] Cannot receive");
             
             //ret.data.buf = buffer;
             memcpy(ret.data.buf, buffer, recv_size);
-            
+            ret.data.size = recv_size;
+            cout<<"[Recv] id: "<<((_frame*)ret.data.buf)->_id<<" type: "<<((_frame*)ret.data.buf)->_type << " length: "<<((_frame*)ret.data.buf)->_length<<endl;
+
             ret.address.ip = inet_ntoa(address.sin_addr);
             ret.address.port = ntohs(address.sin_port);
             
             free(buffer);
             
             return ret;
-        }
-
-    struct _frame{
-        uint16_t _id;
-        uint16_t _type;
-        uint16_t _length;
-        char buf[FRAME_BUF_SIZE];
-    };
+        } 
 
     class BinaryStream{
     protected:
         std::string file_path;
-        int _size;
-        int _ext_size;
-        int _byte_size;
-        int _cur;
-        virtual Data first();
-        virtual Data end();
-        virtual Data mid();
-        virtual void first(Data data);
-        virtual void end(Data data);
-        virtual void mid(Data data);
+        uint32_t _size;
+        uint32_t _ext_size;
+        uint32_t _byte_size;
+        uint32_t _cur;
+        virtual Data* first(){ return nullptr; };
+        virtual Data* end(){ return nullptr; };
+        virtual Data* mid(){ return nullptr; };
+        virtual void first(Data *data){};
+        virtual void end(Data *data){};
+        virtual void mid(Data *data){};
     public:
         BinaryStream(std::string file_path){
             this->file_path = file_path;
@@ -211,8 +223,8 @@ namespace Socket
             this->_ext_size = 0;
             this->_byte_size = 0;
         };
-        virtual Data next(); 
-        virtual void next(Data data);
+        virtual Data* next(){ return nullptr; }; 
+        virtual void next(Data *data){};
         virtual bool has_next(){
             if(this->_ext_size == 0) return true; 
             if(this->_cur < this->_ext_size) return true;
@@ -229,30 +241,28 @@ namespace Socket
     class iBinaryStream :public BinaryStream {
     protected:
         std::ifstream infile;
-
-        Data first() override {
+        Data ret;
+        Data *first() override {
             _frame first_frame;
             first_frame._id = 0;            
             first_frame._type = FRAME_TYPE_START;
             first_frame._length = size();
-            Data ret;
             ret.size = FRAME_HEAD_SIZE;
             memcpy((void*)ret.buf, (void*)&first_frame, ret.size);
-            return ret;
+            return &ret;
         }
 
-        Data end() override {
+        Data *end() override {
             _frame end_frame;
             end_frame._id = ext_size() - 1;
             end_frame._type = FRAME_TYPE_END;
             end_frame._length = 0;
-            Data ret;
             ret.size = FRAME_HEAD_SIZE;
             memcpy((void*)ret.buf, (void*)&end_frame, ret.size);
-            return ret;
+            return &ret;
         }
 
-        Data mid() override{
+        Data *mid() override{
             _frame mid_frame;
             mid_frame._id = _cur;
             mid_frame._type = FRAME_TYPE_DATA;
@@ -260,10 +270,9 @@ namespace Socket
             infile.read(mid_frame.buf, FRAME_BUF_SIZE);
             //确定读入的长度
             mid_frame._length = infile.gcount();
-            Data ret;
             ret.size = FRAME_HEAD_SIZE + mid_frame._length;
             memcpy(ret.buf, (void*)&mid_frame, ret.size); 
-            return ret;
+            return &ret;
         }
 
     public:
@@ -273,7 +282,9 @@ namespace Socket
                 throw Exception("Failed to open file.");
             }
             //获取文件大小
+            infile.seekg(0, infile.end);
             this->_byte_size = infile.tellg();
+            infile.seekg(0, infile.beg);
             //获取数据帧数
             this->_size = (int)ceil((double)this->_byte_size / FRAME_BUF_SIZE);
             //获取整个发送过程需要发送的帧长度 
@@ -285,42 +296,41 @@ namespace Socket
             if(infile.is_open()) infile.close();
         }
 
-        Data next() override {
-            Data ret;
+        Data* next() override {
             if(_cur == 0){
                 //第一个帧
-                ret = first();
+                first();
             }else if(_cur == _ext_size - 1){
                 //最后一个帧
-                ret = end();
+                end();
             }else{
                 //中间的数据帧
-                ret = mid();
+                mid();
             }
-            _cur++;
-            return ret;
+            _cur = _cur + 1;
+            return &ret;
         }
     };
 
     class oBinaryStream : public BinaryStream{
     protected:
         std::ofstream outfile;
-        void first(Data data) override{
-            _frame* _fp = (_frame*)data.buf;
+        void first(Data* data) override{
+            _frame* _fp = (_frame*)data->buf;
             if(_fp->_type != FRAME_TYPE_START) throw Exception("oBinaryStream::first frame type error");
             if(_fp->_id != 0) throw Exception("oBinaryStream::first frame id error");
             this->_size = _fp->_length;
             this->_ext_size = this->_size + 2; 
         }
          
-        void end(Data data) override{
-            _frame* _fp = (_frame*)data.buf;
+        void end(Data* data) override{
+            _frame* _fp = (_frame*)data->buf;
             if(_fp->_type != FRAME_TYPE_END) throw Exception("oBinaryStream::end frame type error");
             if(_fp->_id != this->ext_size() - 1) throw Exception("oBinaryStream::end frame id error");
         }
 
-        void mid(Data data) override{
-            _frame* _fp = (_frame*)data.buf;
+        void mid(Data* data) override{
+            _frame* _fp = (_frame*)data->buf;
             if(_fp->_type != FRAME_TYPE_DATA) throw Exception("oBinaryStream::mid frame type error");
             outfile.write(_fp->buf, _fp->_length);
         }
@@ -335,7 +345,7 @@ namespace Socket
             if(outfile.is_open()) outfile.close();
         }
 
-        void next(Data data) override{
+        void next(Data* data) override{
             if(_cur == 0){
                 //第一个帧
                 first(data);
@@ -353,6 +363,14 @@ namespace Socket
     class FileSocket{
     private:
         UDP socket;
+        void ack(Ip ip, Port port, uint32_t _id){
+            Data tmp_data;
+            _frame* _fp = (_frame*)tmp_data.buf;
+            _fp->_id = _id;
+            _fp->_type = FRAME_TYPE_ACK;
+            tmp_data.size = FRAME_HEAD_SIZE;
+            socket.send(ip, port, &tmp_data);
+        }
     public:
         FileSocket(){};
         ~FileSocket(){};   
@@ -364,15 +382,22 @@ namespace Socket
             iBinaryStream ibs(file_path);
             while(ibs.has_next()){
                 socket.send(ip, port, ibs.next());
+                auto resp = socket.receive();
+                if(((_frame*)resp.data.buf)->_type != FRAME_TYPE_ACK) throw Exception("FileSocket::send ack error"); 
             }    
         }
 
-        void recv(std::string file_path){
+        void recv(Ip ip, Port port, std::string file_path){
             oBinaryStream obs(file_path);
             while(obs.has_next()){
                 Datagram dg = socket.receive();
-                obs.next(dg.data);
+                obs.next(&dg.data);
+                ack(ip, port, ((_frame*)dg.data.buf)->_id);
             }
+        }
+
+        void close(){
+            socket.close();
         }
     };
 }

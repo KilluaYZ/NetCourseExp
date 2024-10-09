@@ -8,16 +8,9 @@ int main(void)
 {
     try
     {
-        Socket::UDP sock;
-        
+        Socket::FileSocket sock;
         sock.bind(2000);
-        
-        Socket::Datagram received = sock.receive();
-        
-        cout << received.data << endl;
-        
-        sock.send("127.0.0.1", 3000, "response");
-        
+        sock.recv("127.0.0.1", 3000, "/home/killuayz/NetCourseExp/exp1/server/file_recv");
         sock.close();
     }
     catch (Socket::Exception &e)
