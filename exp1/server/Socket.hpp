@@ -26,19 +26,31 @@
 #include <exception>
 #include <string>
 #include <stdlib.h>
-
+#include <fstream>
+#include <cmath>
+#include <cstring>
 #include <arpa/inet.h>
-
-#define MAX_BUFFER 1024
 
 using namespace std;
 
 namespace Socket
 {
+
+    const int FRAME_BUF_SIZE = 1018; 
+    const int FRAME_HEAD_SIZE = 6;
+    const int FRAME_SIZE = 1024;
+    const int FRAME_TYPE_START = 1;
+    const int FRAME_TYPE_END = 2;
+    const int FRAME_TYPE_DATA = 3;
+
     typedef int Socket;
     typedef string Ip;
     typedef unsigned int Port;
-    typedef string Data;
+
+    typedef struct{
+        int size;
+        char buf[FRAME_BUF_SIZE];
+    } Data;
     
     typedef struct
     {
@@ -78,9 +90,7 @@ namespace Socket
     private:
         string _message;
     public:
-        Exception(string error) { this->_message = error; }
-        virtual const char* what() { return this->_message.c_str(); }
-    };
+        Exception(string error) { this->_message = error; } virtual const char* what() { return this->_message.c_str(); } };
 
     class UDP
     {
@@ -145,10 +155,10 @@ namespace Socket
             address.sin_port = htons(port);
             inet_aton(ip.c_str(), &address.sin_addr);
             
-            if (sendto(this->_socket_id, (void*)data.c_str(), data.length() + 1, 0, (struct sockaddr*)&address, sizeof(struct sockaddr_in)) == -1)
+            if (sendto(this->_socket_id, (void*)data.buf, data.size + 1, 0, (struct sockaddr*)&address, sizeof(struct sockaddr_in)) == -1)
             {
                 stringstream error;
-                error << "[send] with [ip=" << ip << "] [port=" << port << "] [data=" << data << "] Cannot send";
+                error << "[send] with [ip=" << ip << "] [port=" << port << "] Cannot send";
                 throw Exception(error.str());
             }
         }
@@ -156,13 +166,15 @@ namespace Socket
     Datagram UDP::receive()
         {
             int size = sizeof(struct sockaddr_in);
-            char *buffer = (char*)malloc(sizeof(char) * MAX_BUFFER);
+            char *buffer = (char*)malloc(sizeof(char) * FRAME_BUF_SIZE);
             struct sockaddr_in address;
             Datagram ret;
+            int recv_size = recvfrom(this->_socket_id, (void*)buffer, FRAME_BUF_SIZE, 0, (struct sockaddr*)&address, (socklen_t*)&size); 
+            if (recv_size == -1) throw Exception("[receive] Cannot receive");
             
-            if (recvfrom(this->_socket_id, (void*)buffer, MAX_BUFFER, 0, (struct sockaddr*)&address, (socklen_t*)&size) == -1) throw Exception("[receive] Cannot receive");
+            //ret.data.buf = buffer;
+            memcpy(ret.data.buf, buffer, recv_size);
             
-            ret.data = buffer;
             ret.address.ip = inet_ntoa(address.sin_addr);
             ret.address.port = ntohs(address.sin_port);
             
@@ -170,20 +182,98 @@ namespace Socket
             
             return ret;
         }
-    
+
     struct _frame{
         uint16_t _id;
         uint16_t _type;
         uint16_t _length;
-        char buf[1018];
+        char buf[FRAME_BUF_SIZE];
     };
 
     class BinaryStream{
+    protected:
+        std::string file_path;
+        int _size;
+        int _ext_size;
+        int _byte_size;
+        int _cur;
+        virtual Data first() = 0;
+        virtual Data end() = 0;
     public:
-        
+        BinaryStream(std::string file_path){
+            this->file_path = file_path;
+            this->_size = 0;
+            this->_cur = 0;
+            this->_ext_size = 0;
+            this->_byte_size = 0;
+        };
+        virtual Data next() = 0; 
+        virtual bool has_next() = 0;
+        virtual int size(){
+            return this->_size;
+        } 
+        virtual int ext_size(){
+            return this->_ext_size;
+        }
+    }; 
 
-        BinaryStream(){};
-        ~BinaryStream(){};
+    class iBinaryStream :public BinaryStream {
+    protected:
+        std::ifstream infile;
+
+        Data first() override {
+            _frame first_frame;
+            first_frame._id = 0;            
+            first_frame._type = FRAME_TYPE_START;
+            first_frame._length = size();
+            Data ret;
+            ret.size = FRAME_HEAD_SIZE;
+            memcpy((void*)ret.buf, (void*)&first_frame, ret.size);
+            return ret;
+        }
+
+        Data end() override {
+            _frame end_frame;
+            end_frame._id = ext_size() - 1;
+            end_frame._type = FRAME_TYPE_END;
+            end_frame._length = 0;
+            Data ret;
+            ret.size = FRAME_HEAD_SIZE;
+            memcpy((void*)ret.buf, (void*)&end_frame, ret.size);
+            return ret;
+        }
+
+    public:
+        iBinaryStream(std::string file_path):BinaryStream(file_path){
+            infile = std::ifstream(file_path, ios::binary);
+            if(!infile){
+                throw Exception("Failed to open file.");
+            }
+            //获取文件大小
+            this->_byte_size = infile.tellg();
+            //获取数据帧数
+            this->_size = (int)ceil((double)this->_byte_size / FRAME_BUF_SIZE);
+            //获取整个发送过程需要发送的帧长度 
+            //多一个头帧和尾帧
+            this->_ext_size = this->_size + 2;
+        }
+
+    };
+
+    class FileSocket{
+    private:
+        UDP socket;
+    public:
+        FileSocket(){};
+        ~FileSocket(){};   
+        void bind(Port port){
+            socket.bind(port);
+        }
+
+        void send(std::string file_path){
+            
+        }
+
     };
 }
 
