@@ -8,9 +8,9 @@ int main(void)
 {
     try
     {
-        Socket::FileSocket sock;
-        sock.bind(2000);
-        sock.recv("127.0.0.1", 3000, "/home/dte/NetCourseExp/exp1/server/file_recv");
+        Socket::MFileServer sock;
+        sock.bind(20000);
+        sock.start_service("file2");  
         sock.close();
     }
     catch (Socket::Exception &e)

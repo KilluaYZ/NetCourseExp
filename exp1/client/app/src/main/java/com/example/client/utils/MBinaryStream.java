@@ -5,6 +5,7 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 
 public class MBinaryStream {
     private String filePath;
@@ -37,6 +38,7 @@ public class MBinaryStream {
         MFrame mframe = new MFrame().fromBytes(data);
         if(mframe.get_type() != MFrame.FRAME_TYPE_DATA) throw new RuntimeException();
         outfile.write(mframe.get_buf(), 0, mframe.get_length());
+
     }
 
     private void end(byte[] data) throws IOException {
@@ -97,6 +99,7 @@ public class MBinaryStream {
         return ret;
     }
 
+
     public void next(byte[] _bytes) throws IOException {
         if(this._cur == 0){
             first(_bytes);
@@ -106,5 +109,12 @@ public class MBinaryStream {
             mid(_bytes);
         }
         this._cur++;
+
+    }
+
+    public boolean has_next() {
+        if(this._ext_size == 0) return true;
+        if(this._cur < this._ext_size) return true;
+        return false;
     }
 }

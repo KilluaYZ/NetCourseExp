@@ -13,7 +13,8 @@ public class MFrame {
     public static int FRAME_TYPE_END = 2;
     public static int FRAME_TYPE_DATA = 3;
     public static int FRAME_TYPE_ACK = 4;
-
+    public static int FRAME_TYPE_REQUEST_DATA = 5;
+    public static int FRAME_TYPE_SEND_DATA = 6;
     public MFrame() {
 
     }
