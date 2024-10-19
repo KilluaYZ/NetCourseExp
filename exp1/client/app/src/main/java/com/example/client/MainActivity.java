@@ -15,6 +15,8 @@ import androidx.core.view.WindowInsetsCompat;
 
 import com.example.client.utils.MSocketClient;
 
+import java.io.IOException;
+
 public class MainActivity extends AppCompatActivity {
     // 请求码
     private static final int REQUEST_CODE_SAVE_FILE = 1;
@@ -51,15 +53,21 @@ public class MainActivity extends AppCompatActivity {
 
         if (requestCode == REQUEST_CODE_SAVE_FILE && resultCode == RESULT_OK) {
             if (resultData != null) {
-                Uri uri = null;
-                try {
-                    uri = resultData.getData();
-                    Log.d("MainActivity", "file uri : " + uri.getPath());
-                    MSocketClient msc = new MSocketClient("station.killuayz.top", 20000);
-                    msc.receive(uri.getPath());
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
+                Uri uri = resultData.getData();
+                Log.d("MainActivity", "file uri : " + uri.getPath());
+                Uri finalUri = uri;
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        MSocketClient msc = null;
+                        try {
+                            msc = new MSocketClient("station.killuayz.top", 20000);
+                            msc.receive(finalUri.getPath());
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }).start();
             }
         }
     }}

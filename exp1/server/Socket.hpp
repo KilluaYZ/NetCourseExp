@@ -1,23 +1,3 @@
-/*
- * Socket.hpp
- * This file is part of VallauriSoft
- *
- * Copyright (C) 2012 - Comina, gnuze
- *
- * VallauriSoft is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * VallauriSoft is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with VallauriSoft. If not, see <http://www.gnu.org/licenses/>.
- */
-
 #ifndef _SOCKET_HPP_
 #define _SOCKET_HPP_
 
@@ -82,12 +62,6 @@ namespace Socket
         Port port;
     } Address;
 
-    typedef struct
-    {
-        Address address;
-        Data data;
-    } Datagram;
-
     struct sockaddr_in *to_sockaddr(Address *a)
     {
         struct sockaddr_in *ret;
@@ -111,108 +85,73 @@ namespace Socket
         return ret;
     }
 
-    class Exception
+    class MException
     {
     private:
         string _message;
 
     public:
-        Exception(string error) { this->_message = error; }
+        MException(string error) { this->_message = error; }
         virtual const char *what() { return this->_message.c_str(); }
     };
 
-    class UDP
+    class TCPConnect
     {
     private:
         Socket _socket_id;
         bool _binded;
 
     public:
-        UDP(void);
-        ~UDP(void);
-        void close(void);
-        void bind(Port port);
-        void send(Ip ip, Port port, Data *data);
-        Datagram receive();
+        TCPConnect()
+        {
+        }
     };
 
-    UDP::UDP(void)
+    class TCPServer
     {
-        this->_socket_id = socket(AF_INET, SOCK_DGRAM, 0);
-        if (this->_socket_id == -1)
-            throw Exception("[Constructor] Cannot create socket");
-        this->_binded = false;
-    }
+    private:
+        int max_client;
+        Socket _socket_id;
+        Socket _client_socket_id;
 
-    UDP::~UDP(void)
-    {
-    }
-
-    void UDP::close(void)
-    {
-        shutdown(this->_socket_id, SHUT_RDWR);
-    }
-
-    void UDP::bind(Port port)
-    {
-        struct sockaddr_in address;
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = htonl(INADDR_ANY);
-        address.sin_port = htons(port);
-
-        if (this->_binded)
+    public:
+        TCPServer()
         {
-            this->close();
-            this->_socket_id = socket(AF_INET, SOCK_DGRAM, 0);
-        }
-        // ::bind() calls the function bind() from <arpa/inet.h> (outside the namespace)
-        if (::bind(this->_socket_id, (struct sockaddr *)&address, sizeof(struct sockaddr_in)) == -1)
-        {
-            stringstream error;
-            error << "[listen_on_port] with [port=" << port << "] Cannot bind socket";
-            throw Exception(error.str());
+            _socket_id = socket(AF_INET, SOCK_STREAM, 0);
+            if (_socket_id == -1)
+                throw MException("Socket creation failed");
+            this->max_client = max_client;
         }
 
-        this->_binded = true;
-    }
-
-    void UDP::send(Ip ip, Port port, Data *data)
-    {
-        struct sockaddr_in address;
-        address.sin_family = AF_INET;
-        address.sin_port = htons(port);
-        inet_aton(ip.c_str(), &address.sin_addr);
-        cout << "[Send] id: " << ((_frame *)data->buf)->_id << " type: " << ((_frame *)data->buf)->_type << " length: " << ((_frame *)data->buf)->_length << endl;
-        if (sendto(this->_socket_id, (void *)data->buf, data->size, 0, (struct sockaddr *)&address, sizeof(struct sockaddr_in)) == -1)
+        void tcp_bind(Ip ip, Port port)
         {
-            stringstream error;
-            error << "[send] with [ip=" << ip << "] [port=" << port << "] Cannot send";
-            throw Exception(error.str());
+            sockaddr_in server_address;
+            memset(&server_address, 0, sizeof(server_address));
+
+            // 配置服务器地址
+            server_address.sin_family = AF_INET;
+            server_address.sin_port = htons(port);
+            server_address.sin_addr.s_addr = INADDR_ANY;
+
+            // 将Socket与服务器绑定
+            if (bind(_socket_id, (sockaddr *)&server_address, sizeof(server_address)) == -1)
+                throw MException("Binding failed");
         }
-    }
 
-    Datagram UDP::receive()
-    {
-        int size = sizeof(struct sockaddr_in);
-        char *buffer = (char *)malloc(sizeof(char) * FRAME_SIZE);
-        struct sockaddr_in address;
-        Datagram ret;
-        int recv_size = recvfrom(this->_socket_id, (void *)buffer, FRAME_SIZE, 0, (struct sockaddr *)&address, (socklen_t *)&size);
-        if (recv_size == -1)
-            throw Exception("[receive] Cannot receive");
+        void start_service()
+        {
+            // 只允许一个client连接
+            if (listen(_socket_id, 1) == -1)
+                throw MException("listen error");
 
-        // ret.data.buf = buffer;
-        memcpy(ret.data.buf, buffer, recv_size);
-        ret.data.size = recv_size;
-        cout << "[Recv] id: " << ((_frame *)ret.data.buf)->_id << " type: " << ((_frame *)ret.data.buf)->_type << " length: " << ((_frame *)ret.data.buf)->_length << endl;
+            sockaddr client_addr;
+            int client_addr_len = sizeof(client_addr);
+            // 接受客户端的连接
+            _client_socket_id = accept(this->_socket_id, (sockaddr*)&client_addr, &client_addr);
+            if (_client_socket_id == -1) throw MException("Accepting client connection failed");
+        }
 
-        ret.address.ip = inet_ntoa(address.sin_addr);
-        ret.address.port = ntohs(address.sin_port);
-
-        free(buffer);
-
-        return ret;
-    }
+    };
 
     class BinaryStream
     {
@@ -305,7 +244,7 @@ namespace Socket
             infile = std::ifstream(file_path, ios::binary);
             if (!infile)
             {
-                throw Exception("Failed to open file.");
+                throw MException("Failed to open file.");
             }
             // 获取文件大小
             infile.seekg(0, infile.end);
@@ -354,9 +293,9 @@ namespace Socket
         {
             _frame *_fp = (_frame *)data->buf;
             if (_fp->_type != FRAME_TYPE_START)
-                throw Exception("oBinaryStream::first frame type error");
+                throw MException("oBinaryStream::first frame type error");
             if (_fp->_id != 0)
-                throw Exception("oBinaryStream::first frame id error");
+                throw MException("oBinaryStream::first frame id error");
             this->_size = _fp->_length;
             this->_ext_size = this->_size + 2;
         }
@@ -365,16 +304,16 @@ namespace Socket
         {
             _frame *_fp = (_frame *)data->buf;
             if (_fp->_type != FRAME_TYPE_END)
-                throw Exception("oBinaryStream::end frame type error");
+                throw MException("oBinaryStream::end frame type error");
             if (_fp->_id != this->ext_size() - 1)
-                throw Exception("oBinaryStream::end frame id error");
+                throw MException("oBinaryStream::end frame id error");
         }
 
         void mid(Data *data) override
         {
             _frame *_fp = (_frame *)data->buf;
             if (_fp->_type != FRAME_TYPE_DATA)
-                throw Exception("oBinaryStream::mid frame type error");
+                throw MException("oBinaryStream::mid frame type error");
             outfile.write(_fp->buf, _fp->_length);
         }
 
@@ -383,7 +322,7 @@ namespace Socket
         {
             outfile = std::ofstream(file_path, ios::out | ios::binary);
             if (!outfile)
-                throw Exception("oBinaryStream::oBinaryStream failed to open file");
+                throw MException("oBinaryStream::oBinaryStream failed to open file");
         }
 
         ~oBinaryStream()
@@ -444,7 +383,7 @@ namespace Socket
                 socket.send(client.ip, client.port, ibs.next());
                 auto resp = socket.receive();
                 if (((_frame *)resp.data.buf)->_type != FRAME_TYPE_ACK)
-                    throw Exception("FileSocket::send ack error");
+                    throw MException("FileSocket::send ack error");
             }
         }
 
