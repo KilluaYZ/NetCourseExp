@@ -32,6 +32,16 @@ namespace Socket
     typedef string Ip;
     typedef unsigned int Port;
 
+    class MException
+    {
+    private:
+        string _message;
+
+    public:
+        MException(string error) { this->_message = error; }
+        virtual const char *what() { return this->_message.c_str(); }
+    };
+
     struct _frame
     {
         uint32_t _id;
@@ -48,7 +58,7 @@ namespace Socket
         Data()
         {
             this->size = 0;
-            this->buf = (_frame*)malloc(sizeof(char) * FRAME_SIZE);
+            this->buf = (_frame *)malloc(sizeof(char) * FRAME_SIZE);
         }
 
         ~Data()
@@ -56,8 +66,10 @@ namespace Socket
             free(this->buf);
         }
 
-        void copy(Data* data){
-            if(data == nullptr) throw MException("Error while copying Data");
+        void copy(Data *data)
+        {
+            if (data == nullptr)
+                throw MException("Error while copying Data");
             this->size = data->size;
             memcpy(this->buf, data->buf, sizeof(_frame));
         }
@@ -91,16 +103,6 @@ namespace Socket
 
         return ret;
     }
-
-    class MException
-    {
-    private:
-        string _message;
-
-    public:
-        MException(string error) { this->_message = error; }
-        virtual const char *what() { return this->_message.c_str(); }
-    };
 
     class TCPServer
     {
@@ -170,7 +172,7 @@ namespace Socket
 
         void tcp_send()
         {
-            send(this->_client_socket_id, (char*)this->data->buf, sizeof(_frame), 0);
+            send(this->_client_socket_id, (char *)this->data->buf, sizeof(_frame), 0);
         }
     };
 
@@ -383,7 +385,7 @@ namespace Socket
             tmp_data.buf->_id = _id;
             tmp_data.buf->_type = FRAME_TYPE_ACK;
             tmp_data.size = FRAME_HEAD_SIZE;
-            tcp_server.data->copy(&tmp_data); 
+            tcp_server.data->copy(&tmp_data);
             tcp_server.tcp_send();
         }
 
@@ -407,20 +409,22 @@ namespace Socket
                     {
                         tcp_server.tcp_recv();
                         obs.next(tcp_server.data);
-                        // send ack after receive a package 
+                        // send ack after receive a package
                         ack(tcp_server.data->buf->_id);
                     }
                 }
                 else if (recv_type == FRAME_TYPE_REQUEST_DATA)
                 {
                     iBinaryStream ibs(src_file_path);
-                    while(ibs.has_next()){
-                        Data* data = ibs.next();
+                    while (ibs.has_next())
+                    {
+                        Data *data = ibs.next();
                         tcp_server.data->copy(data);
                         tcp_server.tcp_send();
                         // check if client send ack
                         recv_type = tcp_server.read_stat();
-                        if(recv_type != FRAME_TYPE_ACK) throw MException("Error frame type is not ack");
+                        if (recv_type != FRAME_TYPE_ACK)
+                            throw MException("Error frame type is not ack");
                     }
                 }
                 recv_type = tcp_server.read_stat();
