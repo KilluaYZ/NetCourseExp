@@ -9,11 +9,9 @@ int main(void)
     try
     {
         Socket::MFileServer sock;
-        sock.bind(20000);
-        sock.start_service("file2");  
-        sock.close();
+        sock.start_service("recv_file", "file2");  
     }
-    catch (Socket::Exception &e)
+    catch (Socket::MException &e)
     {
         cout << e.what() << endl;
     }

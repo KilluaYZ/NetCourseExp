@@ -9,9 +9,10 @@
 #include <fstream>
 #include <cmath>
 #include <cstring>
-#include <arpa/inet.h>
 #include <vector>
-
+#include <stdint.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 using namespace std;
 
 namespace Socket
@@ -43,16 +44,22 @@ namespace Socket
     {
     public:
         int size;
-        char *buf;
+        _frame *buf;
         Data()
         {
             this->size = 0;
-            this->buf = (char *)malloc(sizeof(char) * FRAME_SIZE);
+            this->buf = (_frame*)malloc(sizeof(char) * FRAME_SIZE);
         }
 
         ~Data()
         {
             free(this->buf);
+        }
+
+        void copy(Data* data){
+            if(data == nullptr) throw MException("Error while copying Data");
+            this->size = data->size;
+            memcpy(this->buf, data->buf, sizeof(_frame));
         }
     };
 
@@ -95,32 +102,25 @@ namespace Socket
         virtual const char *what() { return this->_message.c_str(); }
     };
 
-    class TCPConnect
-    {
-    private:
-        Socket _socket_id;
-        bool _binded;
-
-    public:
-        TCPConnect()
-        {
-        }
-    };
-
     class TCPServer
     {
-    private:
-        int max_client;
-        Socket _socket_id;
+    public:
+        Socket _server_socket_id;
         Socket _client_socket_id;
+        Data *data;
 
     public:
         TCPServer()
         {
-            _socket_id = socket(AF_INET, SOCK_STREAM, 0);
-            if (_socket_id == -1)
+            _server_socket_id = socket(AF_INET, SOCK_STREAM, 0);
+            if (_server_socket_id == -1)
                 throw MException("Socket creation failed");
-            this->max_client = max_client;
+            this->data = new Data();
+        }
+
+        ~TCPServer()
+        {
+            delete this->data;
         }
 
         void tcp_bind(Ip ip, Port port)
@@ -134,23 +134,44 @@ namespace Socket
             server_address.sin_addr.s_addr = INADDR_ANY;
 
             // 将Socket与服务器绑定
-            if (bind(_socket_id, (sockaddr *)&server_address, sizeof(server_address)) == -1)
+            if (bind(_server_socket_id, (sockaddr *)&server_address, sizeof(server_address)) == -1)
                 throw MException("Binding failed");
         }
 
-        void start_service()
+        int read_stat()
         {
-            // 只允许一个client连接
-            if (listen(_socket_id, 1) == -1)
-                throw MException("listen error");
-
-            sockaddr client_addr;
-            int client_addr_len = sizeof(client_addr);
-            // 接受客户端的连接
-            _client_socket_id = accept(this->_socket_id, (sockaddr*)&client_addr, &client_addr);
-            if (_client_socket_id == -1) throw MException("Accepting client connection failed");
+            tcp_recv();
+            return this->data->buf->_type;
         }
 
+        void tcp_listen()
+        {
+            // 只允许一个client连接
+            if (listen(this->_server_socket_id, 1) == -1)
+                throw MException("listen error");
+        }
+
+        void tcp_accept()
+        {
+            sockaddr_in client_addr;
+            socklen_t client_addr_len = sizeof(client_addr);
+            // 接受客户端的连接
+            this->_client_socket_id = accept(this->_server_socket_id, (sockaddr *)&client_addr, &client_addr_len);
+            if (this->_client_socket_id == -1)
+                throw MException("Accepting client connection failed");
+            cout << "Client connected!" << endl;
+        }
+
+        void tcp_recv()
+        {
+            int recv_size = recv(this->_client_socket_id, this->data->buf, sizeof(_frame), 0);
+            this->data->size = recv_size;
+        }
+
+        void tcp_send()
+        {
+            send(this->_client_socket_id, (char*)this->data->buf, sizeof(_frame), 0);
+        }
     };
 
     class BinaryStream
@@ -355,82 +376,55 @@ namespace Socket
     class MFileServer
     {
     private:
-        UDP socket;
-        Address client;
-        void ack(Ip ip, Port port, uint32_t _id)
+        TCPServer tcp_server;
+        void ack(uint32_t _id)
         {
             Data tmp_data;
-            _frame *_fp = (_frame *)tmp_data.buf;
-            _fp->_id = _id;
-            _fp->_type = FRAME_TYPE_ACK;
+            tmp_data.buf->_id = _id;
+            tmp_data.buf->_type = FRAME_TYPE_ACK;
             tmp_data.size = FRAME_HEAD_SIZE;
-            socket.send(ip, port, &tmp_data);
+            tcp_server.data->copy(&tmp_data); 
+            tcp_server.tcp_send();
         }
 
     public:
         MFileServer() {};
         ~MFileServer() {};
-        void bind(Port port)
-        {
-            socket.bind(port);
-        }
 
-        void send(std::string file_path)
+        void start_service(string src_file_path, string dst_file_path)
         {
-            iBinaryStream ibs(file_path);
-            while (ibs.has_next())
+            tcp_server.tcp_bind("127.0.0.1", 20000);
+            tcp_server.tcp_listen();
+            tcp_server.tcp_accept();
+
+            int recv_type = tcp_server.read_stat();
+            while (recv_type == FRAME_TYPE_SEND_DATA || recv_type == FRAME_TYPE_REQUEST_DATA)
             {
-                socket.send(client.ip, client.port, ibs.next());
-                auto resp = socket.receive();
-                if (((_frame *)resp.data.buf)->_type != FRAME_TYPE_ACK)
-                    throw MException("FileSocket::send ack error");
-            }
-        }
-
-        void recv(std::string file_path)
-        {
-            oBinaryStream obs(file_path);
-            while (obs.has_next())
-            {
-                Datagram dg = socket.receive();
-                obs.next(&dg.data);
-                ack(client.ip, client.port, ((_frame *)dg.data.buf)->_id);
-            }
-        }
-
-        int read_status()
-        {
-            Datagram dg = socket.receive();
-            _frame *_fp = (_frame *)dg.data.buf;
-            this->client = dg.address;
-            return _fp->_type;
-        }
-
-        void start_service(string file_path)
-        {
-            int _resp_status = -1;
-            while (_resp_status == read_status())
-            {
-                if (_resp_status == FRAME_TYPE_REQUEST_DATA)
+                if (recv_type == FRAME_TYPE_SEND_DATA)
                 {
-                    cout << "ip: " << client.ip << "port : " << client.port << " request data";
-                    send(file_path);
+                    oBinaryStream obs(dst_file_path);
+                    while (obs.has_next())
+                    {
+                        tcp_server.tcp_recv();
+                        obs.next(tcp_server.data);
+                        // send ack after receive a package 
+                        ack(tcp_server.data->buf->_id);
+                    }
                 }
-                else if (_resp_status == FRAME_TYPE_SEND_DATA)
+                else if (recv_type == FRAME_TYPE_REQUEST_DATA)
                 {
-                    cout << "ip: " << client.ip << "port : " << client.port << " send data";
-                    recv(file_path);
+                    iBinaryStream ibs(src_file_path);
+                    while(ibs.has_next()){
+                        Data* data = ibs.next();
+                        tcp_server.data->copy(data);
+                        tcp_server.tcp_send();
+                        // check if client send ack
+                        recv_type = tcp_server.read_stat();
+                        if(recv_type != FRAME_TYPE_ACK) throw MException("Error frame type is not ack");
+                    }
                 }
-                else
-                {
-                    cout << "Error Unknow Operation Type";
-                }
+                recv_type = tcp_server.read_stat();
             }
-        }
-
-        void close()
-        {
-            socket.close();
         }
     };
 }
