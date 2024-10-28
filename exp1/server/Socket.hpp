@@ -13,11 +13,12 @@
 #include <stdint.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include "MException.hpp"
 using namespace std;
 
 namespace Socket
 {
-
     const int FRAME_BUF_SIZE = 1016;
     const int FRAME_HEAD_SIZE = 8;
     const int FRAME_SIZE = 1024;
@@ -27,20 +28,13 @@ namespace Socket
     const int FRAME_TYPE_ACK = 4;
     const int FRAME_TYPE_REQUEST_DATA = 5;
     const int FRAME_TYPE_SEND_DATA = 6;
+    const int FRAME_TYPE_MSG = 7;
 
     typedef int Socket;
     typedef string Ip;
     typedef unsigned int Port;
 
-    class MException
-    {
-    private:
-        string _message;
-
-    public:
-        MException(string error) { this->_message = error; }
-        virtual const char *what() { return this->_message.c_str(); }
-    };
+    
 
     struct _frame
     {
@@ -125,6 +119,12 @@ namespace Socket
             delete this->data;
         }
 
+        void tcp_close()
+        {
+            close(_server_socket_id);
+            close(_client_socket_id);
+        }
+
         void tcp_bind(Ip ip, Port port)
         {
             sockaddr_in server_address;
@@ -164,7 +164,7 @@ namespace Socket
             cout << "Client connected!" << endl;
         }
 
-        void tcp_recv()
+        void tcp_recv(bool retry = true)
         {
             int recv_size = recv(this->_client_socket_id, this->data->buf, sizeof(_frame), 0);
             this->data->size = recv_size;
@@ -393,20 +393,31 @@ namespace Socket
         MFileServer() {};
         ~MFileServer() {};
 
+        void close() {
+            tcp_server.tcp_close();
+        }
+
+        void start_msg_service(){
+
+        }
+
         void start_service(string src_file_path, string dst_file_path)
         {
-            tcp_server.tcp_bind("127.0.0.1", 20000);
+            tcp_server.tcp_bind("127.0.0.1", 6028);
             tcp_server.tcp_listen();
             tcp_server.tcp_accept();
-
+            cout << "Waitting for client send type" << endl;
             int recv_type = tcp_server.read_stat();
             while (recv_type == FRAME_TYPE_SEND_DATA || recv_type == FRAME_TYPE_REQUEST_DATA)
             {
+                cout << "Client Type : " << recv_type << endl;
                 if (recv_type == FRAME_TYPE_SEND_DATA)
                 {
+                    cout << "Client send data" << endl;
                     oBinaryStream obs(dst_file_path);
                     while (obs.has_next())
                     {
+                        cout << "Receive a package from client" << endl;
                         tcp_server.tcp_recv();
                         obs.next(tcp_server.data);
                         // send ack after receive a package
@@ -415,9 +426,11 @@ namespace Socket
                 }
                 else if (recv_type == FRAME_TYPE_REQUEST_DATA)
                 {
+                    cout << "Client request data" << endl;
                     iBinaryStream ibs(src_file_path);
                     while (ibs.has_next())
                     {
+                        cout << "Send a package to client" << endl;
                         Data *data = ibs.next();
                         tcp_server.data->copy(data);
                         tcp_server.tcp_send();
@@ -427,6 +440,7 @@ namespace Socket
                             throw MException("Error frame type is not ack");
                     }
                 }
+                cout << "Waiting for next operation..." << endl;
                 recv_type = tcp_server.read_stat();
             }
         }
