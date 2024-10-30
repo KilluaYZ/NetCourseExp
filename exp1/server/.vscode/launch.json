@@ -1,18 +1,34 @@
 {
-    // 使用 IntelliSense 了解相关属性。 
-    // 悬停以查看现有属性的描述。
-    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "SocketServer",
+      "program": "/home/ziyang/works/NetCourseExp/exp1/server/SocketServer",
+      "cwd": "${workspaceFolder}",
+      "type": "cppdbg",
+      "request": "launch",
+      "stopAtEntry": true,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb"
+    },
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "cppdbg",
+      "request": "launch",
+      "args": [],
+      "stopAtEntry": false,
+      "externalConsole": false,
+      "cwd": "/home/ziyang/works/NetCourseExp/exp1/server",
+      "program": "/home/ziyang/works/NetCourseExp/exp1/server/build/Debug/outDebug",
+      "MIMode": "gdb",
+      "miDebuggerPath": "gdb",
+      "setupCommands": [
         {
-            "name": "myserver",
-            "program": "/home/ziyang/works/NetCourseExp/exp1/server/test",
-            "cwd": "${workspaceFolder}",
-            "type": "cppdbg",
-            "request": "launch",
-            "stopAtEntry": true,
-            "MIMode": "gdb",
-            "miDebuggerPath": "/usr/bin/gdb"
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
         }
-    ]
+      ]
+    }
+  ]
 }

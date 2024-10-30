@@ -1,11 +1,10 @@
 CXX = clang++
-CXXFLAGS = -fsanitize=address -g
+CXXFLAGS = -fsanitize=address -g -lpthread
 
-SERVER_SRC = myserver.cpp
-SOCKET_SRC = Socket.hpp
-SERVER_EXEC = myserver
+SERVER_SRC = SocketServer.cpp 
+SERVER_EXEC = SocketServer 
 
-all: $(SERVER_EXEC) $(CLIENT_EXEC)
+all: $(SERVER_EXEC) 
 
 $(SERVER_EXEC): $(SERVER_SRC) 
 	$(CXX) $(CXXFLAGS) -o $@ $^
